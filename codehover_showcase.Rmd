@@ -1,0 +1,353 @@
+---
+title: "codehover — a complete showcase"
+author: "codehover"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(codehover)
+library(ggplot2)
+library(palmerpenguins)   # `penguins` dataset (native `penguins` needs R >= 4.5)
+library(geobr)            # Brazilian spatial data
+library(sf)
+library(dplyr)
+
+theme_set(theme_minimal(base_size = 12))
+
+# drop the few rows with missing measurements so every step renders cleanly
+penguins <- na.omit(penguins)
+```
+
+# What is codehover?
+
+`codehover` turns a plot built up step by step into an **interactive code
+table**. You hover a row of code and the figure beside it changes to show the
+plot *as it looks up to that line*. It is a great way to teach how a `ggplot2`
+chart is assembled, one `+` at a time.
+
+There are two ways in:
+
+* **`ch_hover({ ... })`** — the automatic API. Give it ggplot code; it splits at
+  every top-level `+`, renders one image per step and returns a finished,
+  self-contained hover table (CSS and JavaScript travel with it).
+* **`ch_int()` / `ch_row()` / `ch_out()`** — the manual API, for full control
+  over the rows and the images (any images at all, not only `+` chains).
+
+This page demonstrates **every** feature using only built-in datasets
+(`palmerpenguins`) and Brazilian maps from `geobr`. Hover the code rows below!
+
+---
+
+# 1. The hero: `ch_hover()` incremental
+
+The default mode is **incremental**: hovering a row highlights it and every
+prior row, and the figure shows the cumulative result up to that step. Let's
+build a good-looking penguins scatter plot from scratch.
+
+```{r hero}
+ch_hover({
+  ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm, color = species)) +
+    geom_point(size = 2.5, alpha = .8) +
+    scale_color_viridis_d(option = "turbo", end = .85) +
+    labs(
+      title = "Bill dimensions of Palmer penguins",
+      subtitle = "Hover each line of code to see that step",
+      x = "Bill length (mm)", y = "Bill depth (mm)", color = NULL
+    ) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "top")
+}, width = 6, height = 3.8, dpi = 72)
+```
+
+Start at the top row — just the `ggplot()` call draws an empty panel — and walk
+down: the points appear, get a colour palette, gain titles, then a polished
+theme.
+
+---
+
+# 2. Comparing viridis palettes
+
+A fun use of the **cumulative** behaviour: stack several colour scales. Each new
+`scale_color_viridis_c()` *replaces* the previous one (ggplot keeps only the last
+scale of each type), so hovering down the rows walks you through the viridis
+palettes on the very same plot.
+
+First build a complete base plot and store it in `g`:
+
+```{r palette-base}
+g <- ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g,
+                          color = body_mass_g)) +
+  geom_point(size = 2.5) +
+  labs(title = "Penguin size, coloured by body mass",
+       x = "Flipper length (mm)", y = "Body mass (g)", color = "Mass (g)") +
+  theme_minimal(base_size = 12)
+```
+
+Now hover through the palettes:
+
+```{r palette-walk}
+ch_hover({
+  g +
+    scale_color_viridis_c() +
+    scale_color_viridis_c(option = "turbo") +
+    scale_color_viridis_c(option = "magma") +
+    scale_color_viridis_c(option = "plasma") +
+    scale_color_viridis_c(option = "cividis")
+}, width = 6, height = 3.8, dpi = 72)
+```
+
+> **Note.** Because the scales are *added*, the code shown is cumulative
+> (`+ viridis + turbo + magma + ...`). Visually only the **last** scale on each
+> row wins, which is exactly what makes the palette-by-palette reveal work. When
+> you want each row to be a genuinely independent plot instead, use the manual
+> API (see [Section 9](#9-the-manual-api)).
+
+---
+
+# 3. Fixed scales and layout
+
+## `fixed_scales`
+
+By default every step shows the *true* output of its partial code, so axes can
+jump as layers change the data range. With `fixed_scales = TRUE` the axes,
+legends and panel layout are pinned from the **final** plot, giving a stable
+reveal (mechanism borrowed from the
+[ggreveal](https://github.com/weverthonmachado/ggreveal) package).
+
+Default (axes may move between steps):
+
+```{r fixed-off}
+ch_hover({
+  ggplot(penguins, aes(flipper_length_mm, body_mass_g)) +
+    geom_point(alpha = .5) +
+    geom_smooth(method = "lm", color = "firebrick") +
+    scale_x_continuous(limits = c(170, 235))
+}, width = 6, height = 3.8, dpi = 72)
+```
+
+Same code with `fixed_scales = TRUE` (axes pinned from the start):
+
+```{r fixed-on}
+ch_hover({
+  ggplot(penguins, aes(flipper_length_mm, body_mass_g)) +
+    geom_point(alpha = .5) +
+    geom_smooth(method = "lm", color = "firebrick") +
+    scale_x_continuous(limits = c(170, 235))
+}, fixed_scales = TRUE, width = 6, height = 3.8, dpi = 72)
+```
+
+## `layout`
+
+`layout` controls where the figure sits relative to the code table:
+
+* `"auto"` (default) — side by side when there is room, image wraps below for
+  wide code tables.
+* `"row"` — always side by side; the image shrinks to fit.
+* `"column"` — always below the code.
+
+Forced **row**:
+
+```{r layout-row}
+ch_hover({
+  ggplot(penguins, aes(species, body_mass_g, fill = species)) +
+    geom_boxplot() +
+    scale_fill_viridis_d(option = "mako", end = .85) +
+    theme(legend.position = "none")
+}, layout = "row", width = 5, height = 3.2, dpi = 72)
+```
+
+Forced **column**:
+
+```{r layout-column}
+ch_hover({
+  ggplot(penguins, aes(species, body_mass_g, fill = species)) +
+    geom_boxplot() +
+    scale_fill_viridis_d(option = "mako", end = .85) +
+    theme(legend.position = "none")
+}, layout = "column", width = 5, height = 3.2, dpi = 72)
+```
+
+---
+
+# 4. `type = "one_row"`
+
+The other hover effect highlights **only** the hovered row instead of the row
+and all the rows above it. The figure still shows the cumulative result; only
+the highlight differs. Compare hovering here with Section 1.
+
+```{r one-row}
+ch_hover({
+  ggplot(penguins, aes(bill_length_mm, flipper_length_mm, color = island)) +
+    geom_point(size = 2.5) +
+    scale_color_viridis_d(option = "plasma", end = .8) +
+    labs(x = "Bill length (mm)", y = "Flipper length (mm)", color = NULL)
+}, type = "one_row", width = 6, height = 3.8, dpi = 72)
+```
+
+---
+
+# 5. Maps with `geobr`
+
+`ch_hover()` works with anything that prints as a plot, including `sf` maps.
+Here we build a choropleth of the five Brazilian regions, step by step.
+
+```{r states, cache=TRUE}
+states <- read_state(year = 2020, showProgress = FALSE)
+```
+
+```{r map}
+ch_hover({
+  ggplot(states) +
+    geom_sf(aes(fill = name_region), color = "white", linewidth = .1) +
+    scale_fill_viridis_d(option = "turbo") +
+    labs(title = "Brazil by region", fill = "Region") +
+    theme_void(base_size = 12) +
+    theme(legend.position = "bottom")
+}, width = 6, height = 5, dpi = 72)
+```
+
+> `geobr` caches its downloads, so the first render needs a network connection
+> but later renders are offline.
+
+---
+
+# 6. Custom styling with `css_class`
+
+Pass `css_class = "yourclass"` and define that class in a `<style>` block to
+restyle the table — the hover highlight colour, the font, borders, anything.
+All codehover rules are scoped under `.codehover`, so target
+`.yourclass tr.hover`, `.yourclass table`, and so on.
+
+```{css, echo=TRUE}
+.fancy table {
+  font-family: "Fira Code", "Cascadia Code", monospace;
+  font-size: 0.85em;
+}
+.fancy td {
+  border-bottom: 1px solid #eee;
+}
+.fancy tr.hover {
+  background-color: #2c3e50;   /* dark slate instead of the default yellow */
+  color: #ffffff;
+}
+```
+
+```{r css-class}
+ch_hover({
+  ggplot(penguins, aes(body_mass_g, fill = species)) +
+    geom_density(alpha = .6, color = NA) +
+    scale_fill_viridis_d(option = "rocket", end = .85) +
+    labs(x = "Body mass (g)", y = "Density", fill = NULL)
+}, css_class = "fancy", width = 6, height = 3.8, dpi = 72)
+```
+
+For one-off tweaks you can also push inline attributes straight onto the tags
+via `table_tag_add` / `div_tag_add` in the manual API, e.g.
+`ch_int(table_tag_add = "style='background:#fafafa'")`.
+
+---
+
+# 7. Keep the source clean with `ch_hover_chunk()`
+
+In a report you may not want the plot code written twice. Put it in a normal
+chunk with `eval=FALSE` and reference it **by label** with `ch_hover_chunk()`,
+which reads the chunk's code and feeds it to `ch_hover()`.
+
+```{r penguin_bars, eval=FALSE, echo=TRUE}
+ggplot(penguins, aes(x = species, fill = sex)) +
+  geom_bar(position = "dodge") +
+  scale_fill_viridis_d(option = "cividis", end = .7, na.value = "grey80") +
+  labs(x = NULL, y = "Count", fill = NULL) +
+  coord_flip()
+```
+
+Then a single inline call renders the hover table:
+
+`r ch_hover_chunk("penguin_bars", width = 6, height = 3.5, dpi = 72)`
+
+---
+
+# 8. Keep the HTML small with `path =`
+
+By default each step image is embedded in the HTML as base64, so the page is
+fully self-contained but can get large. Pass a folder to `path =` and codehover
+writes numbered PNGs to disk and references them by relative path instead —
+smaller HTML, but the folder must ship alongside the page.
+
+```{r path}
+ch_hover({
+  ggplot(penguins, aes(bill_length_mm, bill_depth_mm)) +
+    geom_hex(bins = 18) +
+    scale_fill_viridis_c(option = "inferno") +
+    labs(x = "Bill length (mm)", y = "Bill depth (mm)", fill = "Count")
+}, path = "showcase_assets/", width = 6, height = 3.8, dpi = 72)
+```
+
+After rendering, look in `showcase_assets/` — you'll find `codehover-1.png`,
+`codehover-2.png`, … one per step.
+
+---
+
+# 9. The manual API
+
+When your steps are **not** a single ggplot `+` chain — independent plots,
+arbitrary images, data-wrangling stages — build the table by hand with
+`ch_int()` → `ch_row()` → `ch_out()`. This is also the *correct* way to compare
+palettes when you want each row to be a genuinely separate plot (contrast with
+[Section 2](#2-comparing-viridis-palettes)).
+
+Render each palette to its own PNG first:
+
+```{r manual-render}
+base <- ggplot(penguins, aes(flipper_length_mm, body_mass_g, color = body_mass_g)) +
+  geom_point(size = 2.5) +
+  labs(x = "Flipper length (mm)", y = "Body mass (g)", color = "Mass (g)") +
+  theme_minimal(base_size = 12)
+
+palettes <- c("viridis", "turbo", "magma", "plasma", "cividis")
+
+files <- vapply(palettes, function(opt) {
+  f <- tempfile(fileext = ".png")
+  ggsave(f, base + scale_color_viridis_c(option = opt),
+         width = 6, height = 3.8, dpi = 72)
+  f
+}, character(1))
+```
+
+Now assemble the table — each row is an **independent** image, and the code
+shown is whatever text you choose:
+
+```{r manual-build}
+tbl <- ch_int(type = "one_row")
+for (i in seq_along(palettes)) {
+  tbl <- ch_row(tbl,
+                text = paste0("scale_color_viridis_c(option = \"", palettes[i], "\")"),
+                img  = files[i])
+}
+ch_out(tbl, img = files[1])
+```
+
+Here hovering each row shows **only** that palette — no cumulative stacking,
+because every row points at its own pre-rendered image.
+
+---
+
+## Recap
+
+| Feature | How |
+|---|---|
+| Incremental reveal | `ch_hover({ ... })` (default) |
+| Highlight one row | `ch_hover(..., type = "one_row")` |
+| Stable axes across steps | `ch_hover(..., fixed_scales = TRUE)` |
+| Image placement | `ch_hover(..., layout = "auto" / "row" / "column")` |
+| Custom styling | `ch_hover(..., css_class = "...")` + a `<style>` block |
+| Clean source | `ch_hover_chunk("label")` on an `eval=FALSE` chunk |
+| Smaller HTML | `ch_hover(..., path = "folder/")` |
+| Full control / any images | `ch_int()` → `ch_row()` → `ch_out()` |
